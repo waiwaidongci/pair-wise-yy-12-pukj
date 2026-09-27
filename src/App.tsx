@@ -1,126 +1,136 @@
+import { useEffect, useMemo, useState } from "react";
 import "./styles.css";
+import type { WarrantyState } from "./domain/types";
+import { loadState, resetState, saveState } from "./archive/warrantyStore";
+import { RegisterPage } from "./pages/RegisterPage";
+import { RecordsPage } from "./pages/RecordsPage";
+import { InspectionsPage } from "./pages/InspectionsPage";
+import { HorsePage } from "./pages/HorsePage";
 
-const project = {
-  "sourceNo": 6,
-  "id": "hxyfront-62011",
-  "port": 62011,
-  "title": "马术蹄铁修整档案",
-  "domain": "马术蹄铁",
-  "prompt": "做一个面向马术俱乐部蹄铁师的修蹄记录前端项目，可以记录马匹编号、步态问题、蹄形评估、蹄铁类型、钉位、修蹄日期、下次复查日期和照片备注。页面需要有马匹列表、复查提醒、左右前后蹄对比记录、异常步态标记和蹄铁更换历史。",
-  "palette": [
-    "#78350f",
-    "#166534",
-    "#2563eb"
-  ],
-  "metrics": [
-    "待复查",
-    "异常步态",
-    "更换蹄铁",
-    "马匹档案"
-  ],
-  "filters": [
-    "前蹄",
-    "后蹄",
-    "运动马",
-    "休养马"
-  ],
-  "fields": [
-    "马匹编号",
-    "步态问题",
-    "蹄形评估",
-    "蹄铁类型",
-    "钉位",
-    "下次复查"
-  ],
-  "records": [
-    [
-      "HORSE-18",
-      "右前蹄外侧磨耗",
-      "铝蹄铁",
-      "14天后复查"
-    ],
-    [
-      "HORSE-27",
-      "后蹄裂纹",
-      "加护蹄垫",
-      "拍照归档"
-    ],
-    [
-      "HORSE-31",
-      "步态轻微不稳",
-      "需教练复核",
-      "已标记"
-    ]
-  ]
-};
+type Tab = "register" | "records" | "inspections" | "horse";
+
+const TABS: { key: Tab; label: string }[] = [
+  { key: "register", label: "装蹄与申诉" },
+  { key: "records", label: "质保记录" },
+  { key: "inspections", label: "停用与检换" },
+  { key: "horse", label: "按马号查档" },
+];
+
+function todayISO(): string {
+  return new Date().toISOString().slice(0, 10);
+}
 
 function App() {
+  const [state, setState] = useState<WarrantyState>(() => loadState());
+  const [tab, setTab] = useState<Tab>("register");
+  const [horseQuery, setHorseQuery] = useState("");
+  const [notice, setNotice] = useState<{ tone: "ok" | "err"; text: string } | null>(
+    null,
+  );
+
+  const today = todayISO();
+
+  useEffect(() => {
+    saveState(state);
+  }, [state]);
+
+  // 通知短暂展示后自动消失
+  useEffect(() => {
+    if (!notice) return;
+    const timer = setTimeout(() => setNotice(null), 5000);
+    return () => clearTimeout(timer);
+  }, [notice]);
+
+  const notify = (tone: "ok" | "err", text: string) => setNotice({ tone, text });
+
+  const openHorse = (horseId: string) => {
+    setHorseQuery(horseId);
+    setTab("horse");
+  };
+
+  const metrics = useMemo(() => {
+    const activeFittings = state.fittings.filter(
+      (f) => f.warrantyUntil >= today,
+    ).length;
+    const openClaims = state.claims.filter((c) => c.status === "未结").length;
+    const pendingInspections = state.inspections.filter(
+      (i) => i.status === "待检换",
+    ).length;
+    const sealedStock = state.forgings
+      .filter((f) => f.sealed)
+      .reduce((sum, f) => sum + f.stock, 0);
+    return [
+      { label: "保修中装蹄", value: activeFittings },
+      { label: "未结索赔", value: openClaims },
+      { label: "待检换马匹", value: pendingInspections },
+      { label: "封存库存件", value: sealedStock },
+    ];
+  }, [state, today]);
+
+  const doReset = () => {
+    if (window.confirm("确定恢复演示数据？当前所有登记将被清除。")) {
+      setState(resetState());
+      setTab("register");
+      notify("ok", "已恢复演示数据。");
+    }
+  };
+
   return (
     <main className="app">
       <section className="hero">
-        <p>{project.id} · 源提示词{project.sourceNo} · Port {project.port}</p>
-        <h1>{project.title}</h1>
-        <span>{project.prompt}</span>
+        <p>hxyfront-62011 · 装蹄质保模块 · Port 62011</p>
+        <h1>蹄铁装蹄质保档案</h1>
+        <span>
+          每次装蹄登记锻件编号、蹄位与保修截止日；同一锻件未结索赔只有一笔，过期或编号对不上的申诉退回。
+          锻件停用后已装马匹进入检换名单、库存同编号件封存，原装蹄与历次处理仍按马号可查。
+        </span>
       </section>
 
       <section className="metrics">
-        {project.metrics.map((metric: string, index: number) => (
-          <article key={metric}>
-            <small>{metric}</small>
-            <strong>{[28, 6, 14, 91][index] ?? 10}</strong>
+        {metrics.map((m) => (
+          <article key={m.label}>
+            <small>{m.label}</small>
+            <strong>{m.value}</strong>
           </article>
         ))}
       </section>
 
-      <section className="workspace">
-        <aside className="panel">
-          <h2>{project.domain}分类</h2>
-          <div className="chips">
-            {project.filters.map((item: string) => (
-              <button key={item}>{item}</button>
-            ))}
-          </div>
-        </aside>
+      <nav className="tabs">
+        {TABS.map((t) => (
+          <button
+            key={t.key}
+            className={tab === t.key ? "active" : ""}
+            onClick={() => setTab(t.key)}
+          >
+            {t.label}
+          </button>
+        ))}
+        <button className="reset" onClick={doReset}>
+          恢复演示数据
+        </button>
+      </nav>
 
-        <section className="panel form-panel">
-          <div className="heading">
-            <div>
-              <p>专业字段</p>
-              <h2>新增记录</h2>
-            </div>
-            <button className="primary">保存记录</button>
-          </div>
-          <div className="field-grid">
-            {project.fields.map((field: string) => (
-              <label key={field}>
-                <span>{field}</span>
-                <input placeholder={"填写" + field} />
-              </label>
-            ))}
-          </div>
-        </section>
-      </section>
+      {notice && (
+        <div className={`notice ${notice.tone} notice-bar`}>{notice.text}</div>
+      )}
 
-      <section className="panel">
-        <div className="heading">
-          <div>
-            <p>近期记录</p>
-            <h2>工作台摘要</h2>
-          </div>
-          <button>导出CSV</button>
-        </div>
-        <div className="records">
-          {project.records.map((record: string[], index: number) => (
-            <article key={record.join("-")}>
-              <b>{String(index + 1).padStart(2, "0")}</b>
-              <div>
-                <h3>{record[0]}</h3>
-                <p>{record.slice(1).join(" · ")}</p>
-              </div>
-            </article>
-          ))}
-        </div>
-      </section>
+      {tab === "register" && (
+        <RegisterPage state={state} today={today} onCommit={setState} notify={notify} />
+      )}
+      {tab === "records" && (
+        <RecordsPage state={state} today={today} onOpenHorse={openHorse} />
+      )}
+      {tab === "inspections" && (
+        <InspectionsPage state={state} today={today} onCommit={setState} notify={notify} />
+      )}
+      {tab === "horse" && (
+        <HorsePage
+          state={state}
+          today={today}
+          initialHorse={horseQuery}
+          onBack={() => setTab("records")}
+        />
+      )}
     </main>
   );
 }
